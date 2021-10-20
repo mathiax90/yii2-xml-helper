@@ -1,0 +1,22 @@
+{
+    "name": "mathiax90/yii2-xml-helper",
+    "description": "Helps to validate and load XML to DB. Uses DomDocument, XmlReader and libxml.",
+    "type": "yii2-extension",
+    "keywords": ["yii2", "extension", "xml"],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "mathiax90",
+            "email": "mathiax90@gmail.com"
+        }
+    ],
+    "minimum-stability": "dev",
+    "require": {
+        "yiisoft/yii2": "~2.0.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "mathiax90\\XmlHelper\\": "/src"
+        }
+    }
+}
