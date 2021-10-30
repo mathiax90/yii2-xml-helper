@@ -2,143 +2,78 @@
 
 namespace mathiax90\XmlHelper;
 
-use mathiax90\Yii2XmlHelper\XmlValidator;
-use Yii;
+use mathiax90\XmlHelper\XmlValidator;
+use mathiax90\XmlHelper\XmlHelper;
+use PDO;
 
 class MssqlXmlLoadHelper {
-
-    private string $xmlFilePath;
-    private $inFileNameWithExt;
-    private $endcoding;
-    private $inFileBaseName;
-    public $errors;
-    public $validationErrors;
-    //* @var $preparedXml string */
-    private $preparedXml;
-    private $isXmlPrepared;
+    public $errors = [];
+    public XmlHelper $xmlHelper;
 
     /**
      *
-     * @param string $inFilePath
+     * @param string $xmlFilePath
      * @return type
      */
     function __construct(string $xmlFilePath) {
-        $this->xmlFilePath = $xmlFilePath;
-        $this->inFileNameWithExt = $inFileNameWithExt;
-        $this->endcoding;
-
-        if (!$this->inFileExists()) {
-            $this->errors[] = "Can't find file " . $inFilePath;
-            return;
-        }
-
-        $this->inFileBaseName = basename($this->inFileNameWithExt);
-        if ($this->inFileBaseName == "") {
-            $this->errors[] = "BaseName is empty string";
-            return;
-        }
-
-        $this->isXmlPrepared = false;
+        $this->xmlHelper = new XmlHelper($xmlFilePath);
     }
 
-    /**
-     * returns preparedXml or false (boolean)
-     *
-     * @params
-     * @return string if success, bool false if error
-     */
-    public function getPreparedXml() {
-        if ($this->isXmlPrepared) {
-            return $this->preparedXml;
+    function prepareXml(): bool {
+        if (count($this->xmlHelper->errors) > 0) {
+            array_push($this->errors, $this->xmlHelper->errors);
+            return false;
         } else {
-            return false;
-        }
-    }
-
-    /**
-     * prepare XML for loading. Decodes.
-     * @return boolean
-     */
-    public function prepareXml() {
-        $domDocument = new \DOMDocument();
-        if ($domDocument->load($this->inFilePath)) {
-            $this->preparedXml = $domDocument->saveXML($domDocument->documentElement);
-//            Yii::info('prepared xml:');
-//            Yii::info(print_r($this->preparedXml, true));
-            $this->isXmlPrepared = true;
-            return true;
-        } else {
-            $this->errors[] = "error while document load";
-            $this->isXmlPrepared = false;
-            return false;
-        }
-    }
-
-    public function isNameMatchesRegex($regexPattern) {
-        if (preg_match($regexPattern, $this->inFileNameWithExt)) {
-            return true;
-        }
-        return false;
-    }
-
-    public function isValidByXsd($xsdPath) {
-        if (!file_exists($xsdPath)) {
-            $this->errors[] = "Can't find xsd-scheme: " . $xsdPath . "\r\n File is not exist.";
-            return false;
-        }
-        try {
-//validate xml
-            $validator = new XmlValidator();
-            if (!$validator->isValid($this->inFilePath, $xsdPath)) {
-                $this->validationErrors = $validator->errors;
-                return false;
+            if ($this->xmlHelper->contentReady) {
+                return true;
+            } else {
+                if ($this->xmlHelper->readContent()) {
+                    return true;
+                } else {
+                    array_push($this->errors, $this->xmlHelper->errors);
+                    return false;
+                }
             }
-        } catch (Exception $e) {
-            $this->errors[] = 'Исключение при валидации по XSD.\r\n' . $e;
-            return false;
         }
-        return true;
     }
 
     /**
-     * Выполняет хранимую процедуру с заданныи параметрами.
-     * Параметры задаются массивом
-     * Элемент массива выглядит так:
-     * ['name' => ":xml", 'value' => $XmlLoader->getPreparedXml(), 'type' => PDO::PARAM_STR];
-     * Если параметр input-output то так:
+     * Runs SP with Params
+     * $spCallQuery example - exec sp_testsp :param1, :param2, paramX, :msg
+     * Params is an array
+     * Param example:
+     * ['name' => ":xml", 'value' => "xml here", 'type' => PDO::PARAM_STR];
+     * Param example with output value
      * ['name' => ":inout", 'value' => "", 'type' => PDO::PARAM_STR | PDO::PARAM_INPUT_OUTPUT, 'len' => 300];
-     * ВНИМАНИЕ ОБЯЗАТЕЛЬН НУЖНО ИСПОЛЬЗОВАТЬ ПАРАМЕТР msg
+     * msg param is required (always):
      * ['name' => ":msg", 'value' => "", 'type' => PDO::PARAM_STR | PDO::PARAM_INPUT_OUTPUT, 'len' => 300];
-     * т.к. на основе него будет выполняться решение об откате транзакции, если переменная будет заполнена в ХП
-     * значение переменной будет передано в массив errors
+     * if msg is empty string transaction will be commited, else rollback.
+     * msg will be added to the helper errors
      *
-     *
-     * @param string $sqlQuery
+     * @param string $spCallQuery
      * @param yii\db\Connection $connection
      * @param ArrayOfPDOParams $params
      * @return boolean
      */
-    public function simpleLoadWithParams($sqlQuery, $connection, $params) {
-        if (!$this->isXmlPrepared) {
-            if (!$this->prepareXml()) {
-                return false;
-            }
+    public function simpleLoadWithParams($spCallQuery, $connection, $params): bool {
+        if (!$this->prepareXml()) {
+            return false;
         }
+
         $msg = "";
         $msgParamExists = false;
         $transaction = $connection->beginTransaction();
         try {
-            $command = \Yii::$app->db->createCommand($sqlQuery);
+            $command = $connection->createCommand($spCallQuery);
             foreach ($params as $param) {
                 if (isset($param['name'])) {
                     if (trim($param['name']) == ':msg') {
-                        Yii::info("msg is binded");
                         $command->bindParam($param['name'], $msg, $param['type'], $param['len']);
                         $msgParamExists = true;
                         continue;
                     }
                 } else {
-                    $this->errors[] = 'Параметр не содержит поля name\r\n' . print_r($param, true);
+                    $this->errors[] = 'Param has no name\r\n' . print_r($param, true);
                     return false;
                 }
                 if (isset($param['len'])) {
@@ -148,7 +83,7 @@ class MssqlXmlLoadHelper {
                 }
             }
             if (!$msgParamExists) {
-                $this->errors[] = 'Не задан параметр msg. rtm pls.';
+                $this->errors[] = 'msg param is required';
                 return false;
             }
             $command->execute();
@@ -159,7 +94,6 @@ class MssqlXmlLoadHelper {
         }
 
         if (strlen(trim($msg)) > 0) {
-            Yii::info('msg: ' . $msg . ' msglen: ' . strlen($msg));
             $transaction->rollBack();
             $this->errors[] = "Error while SP execution.\r\n" . $msg;
             return false;
@@ -170,27 +104,27 @@ class MssqlXmlLoadHelper {
     }
 
     /**
-     * Load XML
-     *
-     * @params string storedProcedureName (name only)
-     * @return bool, errors in XmlHelper->errorss
+     * simpleLoad - runs SP with signature exec $spName :xml, :filename, :msg
+     * msg - is output param varchar(300)
+     * if msg is empty string transaction will be commited, else rollback.
+     * msg will be added to helper errors
+     * @param type $spName
+     * @param type $connection
+     * @return boolean
      */
-    public function simpleLoad($storedProcedureName, $connection) {
-        if (!$this->isXmlPrepared) {
-            if (!$this->prepareXml()) {
-                return false;
-            }
+    public function simpleLoad($spName, $connection): bool {
+        if (!$this->prepareXml()) {
+            return false;
         }
-
         $msg = "";
         $transaction = $connection->beginTransaction();
         try {
-            $result = \Yii::$app->db->createCommand("exec " . $storedProcedureName . " :xml,:filename, :msg")
-                    ->bindValue(':xml', $this->preparedXml)
-                    ->bindValue(':filename', $filename)
+            $result = \Yii::$app->db->createCommand("exec " . $spName . " :xml,:filename, :msg")
+                    ->bindValue(':xml', $this->xmlHelper->content)
+                    ->bindValue(':filename', $this->xmlHelper->fileNameNoExt)
                     ->bindParam(":msg", $msg, PDO::PARAM_STR | PDO::PARAM_INPUT_OUTPUT, 300)
                     ->execute();
-        } catch (\Throwable $e) {
+        } catch (Exception $e) {
             $transaction->rollBack();
             $this->errors[] = "Exception while SP execution.\r\n" . $e;
             return false;
@@ -205,12 +139,4 @@ class MssqlXmlLoadHelper {
         $transaction->commit();
         return true;
     }
-
-    private function inFileExists() {
-        if (!file_exists($this->inFilePath)) {
-            return false;
-        }
-        return true;
-    }
-
 }

@@ -6,31 +6,50 @@ class XmlValidator {
 
     public $errors;
     private $xmlFilePath;
-    private $xsdFilePath;
+    public $xsdFilePath;
 
     function __construct(string $xmlFilePath, string $xsdFilePath) {
         $this->xmlFilePath = $xmlFilePath;
         $this->xsdFilePath = $xsdFilePath;
     }
 
-    public function isValidByXsd(): bool {
+    public function isValidByXsd(string $xsdFilePath = null): bool {
+        if (!empty($xsdFilePath)) {
+            $this->xsdFilePath = $xsdFilePath;
+        }
 
-        if (!fileExists($this->xmlFilePath)) {
+        if (!file_exists($this->xmlFilePath)) {
             $this->errors[] = "XML-file not found: " . $this->xmlFilePath;
             return false;
         }
 
-        if (!fileExists($this->xsdFilePath)) {
+        if (!file_exists($this->xsdFilePath)) {
             $this->errors[] = "XSD-file not found: " . $this->xmlFilePath;
             return false;
         }
 
+        libxml_use_internal_errors(true);
+        $this->readAndFindErrors();
+        libxml_use_internal_errors(false);
+        if (count($this->errors) == 0) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    private function readAndFindErrors(): bool {
         try {
-            libxml_use_internal_errors(true);
+
             $xmlReader = new \XMLReader();
-            $xmlReader->open($xml_path);
+
+            if (!$xmlReader->open($this->xmlFilePath)) {
+                $this->errors[] = "XMLReader open returned false. Can't open $this->xmlFilePath";
+                return false;
+            }
+
             $xmlReader->setSchema($this->xsdFilePath);
-            while (@$xml->read()) {
+            while (@$xmlReader->read()) {
 
             };
             $this->errors = libxml_get_errors();
@@ -38,13 +57,7 @@ class XmlValidator {
             $this->errors[] = "Exception while validating by XSD\r\n" . $ex;
             return false;
         }
-
-        if (count($this->errors) == 0) {
-            return true;
-        }
-        else {
-            return false;
-        }
+        return true;
     }
 
 }
